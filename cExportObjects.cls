@@ -25,50 +25,50 @@ Public Sub InitializeProperties(destpath As String, Optional strSourceDb As Stri
     Set theProject = Application.VBE.VBProjects(1) '(GetFileBaseName(theDb.name))
 End Sub
 
+'
+'Public Sub exportAForm(sName As String)
+'    Application.SaveAsText acForm, sName, theDest & sName & ".frm"
+'    Debug.Print sName
+'End Sub
+'
+'Public Sub ExportAllForms()
+'    Dim obj As Document
+'
+'    For Each obj In theDb.Containers!Forms.Documents
+'        If Left$(obj.Name, 1) <> "~" Then
+'            exportAForm obj.Name
+'        End If
+'    Next obj
+'End Sub
 
-Public Sub exportAForm(sName As String)
-    Application.SaveAsText acForm, sName, theDest & sName & ".frm"
-    Debug.Print sName
-End Sub
+'Public Sub exportAQuery(sName As String)
+'    Dim qd As DAO.QueryDef
+'    For Each qd In theDb.QueryDefs
+'        If Left$(qd.Name, 1) <> "~" Then
+'            Application.SaveAsText acQuery, qd.Name, theDest & qd.Name & ".qry"
+'        End If
+'    Next qd
+'End Sub
 
-Public Sub ExportAllForms()
-    Dim obj As Document
-    
-    For Each obj In theDb.Containers!Forms.Documents
-        If Left$(obj.Name, 1) <> "~" Then
-            exportAForm obj.Name
-        End If
-    Next obj
-End Sub
+'Public Sub exportAllQueries()
+'    Dim qd As DAO.QueryDef
+'    For Each qd In theDb.QueryDefs
+'        exportAQuery qd.Name
+'    Next qd
+'End Sub
 
-Public Sub exportAQuery(sName As String)
-    Dim qd As DAO.QueryDef
-    For Each qd In theDb.QueryDefs
-        If Left$(qd.Name, 1) <> "~" Then
-            Application.SaveAsText acQuery, qd.Name, theDest & qd.Name & ".qry"
-        End If
-    Next qd
-End Sub
-
-Public Sub exportAllQueries()
-    Dim qd As DAO.QueryDef
-    For Each qd In theDb.QueryDefs
-        exportAQuery qd.Name
-    Next qd
-End Sub
-
-Public Sub exportAReport(sName As String)
-    Application.SaveAsText acReport, sName, theDest & sName & ".frm"
-End Sub
-
-Private Sub ExportAllReports()
-    Dim obj As Document
-    For Each obj In theDb.Containers!Reports.Documents
-        If Left$(obj.Name, 1) <> "~" Then
-            exportAReport obj.Name
-        End If
-    Next obj
-End Sub
+'Public Sub exportAReport(sName As String)
+'    Application.SaveAsText acReport, sName, theDest & sName & ".frm"
+'End Sub
+''
+'Private Sub ExportAllReports()
+'    Dim obj As Document
+'    For Each obj In theDb.Containers!Reports.Documents
+'        If Left$(obj.Name, 1) <> "~" Then
+'            exportAReport obj.Name
+'        End If
+'    Next obj
+'End Sub
 
 'Private Function ToFileExtension(vbeComponentType As vbext_ComponentType) As String
 '    Select Case vbeComponentType

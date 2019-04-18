@@ -1,14 +1,18 @@
 Attribute VB_Name = "Git_tools_mod"
 'Option Compare Database
 'Option Explicit
+Const ZERO = 0
 '
-
-Sub Export_All()
-Dim oG As GIT_Rep_Tools
-    Set oG = Create_GIT_Rep_Tools()
-    If Not IsDestroyed(oG) Then
-    End If
-End Sub
+'
+'Sub Export_All()
+'Dim oG As GIT_Rep_Tools
+'    Set oG = Create_GIT_Rep_Tools()
+'    If Not IsDestroyed(oG) Then
+'    'oG.gitSaveFormState ("fORM1")
+'
+'    End If
+'    Set oG = Nothing
+'End Sub
 
 
 ''
