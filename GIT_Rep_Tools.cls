@@ -12,32 +12,46 @@ Attribute VB_Exposed = False
 ' Author    : Lambert
 ' Date      : 2/27/2019
 ' Purpose   : A class to handle some GIT repository functionality in Access.
-'           : all forlders paths are assumed to be the current path wherre the .git folder resides
+'           : all folders paths are assumed to be the current path where the .git folder resides
 '---------------------------------------------------------------------------------------
 
 Option Compare Database
 Option Explicit
 
 Private Const NOT_A_MODULE = -1
-Private GIT_OBJECTS_TABLE   As String
-Private Mod_ThisProject As VBProject
-Private GitFolder As String
+Private Const NULL_DATE = #1/1/1700#
 
+Private GIT_OBJECTS_TABLE   As String
+Private theProject As VBProject
+Private theGitFolder As String
+
+'---------------------------------------------------------------------------------------
+' Procedure : InitializeProperties
+' Author    : Lambert
+' Date      : 4/16/2019
+' Purpose   : Creates the GIT object that will managed the database objects in the
+            ' development project.
+' Parameters: ObjectTable - the name of the table that will be used to log information
+            ' about database objects
+'---------------------------------------------------------------------------------------
+'
 Public Function InitializeProperties(ObjectTable As String) As Boolean
-' first check to see if there is a .git folder in the application folder
+' first check to see if the application folder is set up as
+' a GIT repository
+
     Dim sFile As Variant
     Dim fso As Object
     Dim folder As Object
     Dim IsRepository As Boolean
     ' Using vbscript to look for the hidden .git folder
     Set fso = CreateObject("Scripting.FileSystemObject")
-    GitFolder = CurrentProject.Path & "\"
-    IsRepository = fso.folderexists(GitFolder & ".git")
+    theGitFolder = CurrentProject.Path & "\"
+    IsRepository = fso.folderexists(theGitFolder & ".git")
     If IsRepository Then
         GIT_OBJECTS_TABLE = ObjectTable
         ' Here we want to get the first project in the VBE, which is
         ' the one which will be importing/exporting files for the Git rpository it sits in.
-        Set Mod_ThisProject = Application.VBE.VBProjects(1)
+        Set theProject = Application.VBE.VBProjects(1)
     Else
         Debug.Print "The current file " & CurrentProject.Name & " is not in a GIT repository."
     End If
@@ -45,61 +59,12 @@ Public Function InitializeProperties(ObjectTable As String) As Boolean
 
 End Function
 
-Public Function ExportAllModulesAndClasses() As Boolean    'Optional bAskToSave As Boolean = True) As Boolean
-' this routine will export classes and vba modules
-    Dim component As VBComponent
-    Dim N As Long
-    Dim Saved As Boolean
-    Dim mType As Long
-
-    'First check if there are any code modules that have not been saved
-    Dim c As New Collection
-    Dim msg As String
-
-    For Each component In Mod_ThisProject.VBComponents
-        mType = moduleType(component.Name)
-        If mType = acStandardModule Or mType = acClassModule Then
-            Saved = component.Saved
-            If Saved = False Then
-                c.Add component.Name
-                msg = msg & IIf(msg & "" > "", vbCrLf, vbNullString) & component.Name
-            End If
-        End If
-    Next
-    msg = IIf(c.Count > 1, "There are ", "There is ") & c.Count & " unsaved modules/classes:" & vb2CrLf & msg
-    msg = msg & vb2CrLf & "Do you want to save them now?"
-    If c.Count > 0 Then
-        If MsgBox(msg, vbYesNo Or vbQuestion) = vbNo Then
-            FlashMessage "Export cancelled"
-            ExportAllModulesAndClasses = False
-            Exit Function
-        End If
-    End If
-    For N = 1 To c.Count
-        Debug.Print c(N)
-        DoCmd.Save acModule, c(N)
-    Next N
-
-    For Each component In Mod_ThisProject.VBComponents
-        mType = moduleType(component.Name)
-        If mType = acStandardModule Or mType = acClassModule Then
-            ExportModuleOrClass component.Name
-        End If
-    Next
-
-    ExportAllModulesAndClasses = True
-    Debug.Print "done"
-End Function
-
 Public Sub ExportAllObjects()
-    If ExportAllModulesAndClasses() Then
-    ExportAllForms
-'    ExportAllReports
-'    exportAllQueries
-    End If
+    ExportForms
+    ExportlModulesAndClasses
 End Sub
 
-Public Sub ExportAForm(ByVal formName As String, Optional PromptToSave As Boolean = False)
+Public Sub ExportForm(ByVal formName As String, Optional PromptToSave As Boolean = False)
 
     Select Case SysCmd(acSysCmdGetObjectState, acForm, formName)
     Case Is < 2
@@ -109,160 +74,184 @@ Public Sub ExportAForm(ByVal formName As String, Optional PromptToSave As Boolea
             If MsgBox("Form " & formName & " has been modified. Save the design before exporting?", vbYesNo Or vbQuestion) = vbYes Then
                 DoCmd.Save acForm, formName
             End If
-        Else
+        Else ' default is to save without asking
             DoCmd.Save acForm, formName
         End If
     Case 5
         ' a new form, don't do anything
+        mbox "'" & formName & "'" & vb2CrLf & "This form is new. Please save it manually first.", vbOKOnly
         Exit Sub
     End Select
     ' now export the design of the form object
-    Application.SaveAsText acForm, formName, GitFolder & formName & ".frm"
-    gitSaveFormState formName
+    Application.SaveAsText acForm, formName, theGitFolder & formName & ".frm"
+    gitSaveObjectState acForm, formName
 End Sub
 
-Public Sub ExportAllForms()
+Public Sub ExportForms()
     Dim N As Long
     Dim db As DAO.Database
     Set db = CurrentDb
-
+    ' TODO check each form's SavedState to see if we need to export it at all
     For N = 0 To db.Containers!Forms.Documents.Count - 1
-        ExportAForm db.Containers!Forms.Documents(N).Name
+        ExportForm db.Containers!Forms.Documents(N).Name
     Next N
     Set db = Nothing
 End Sub
 
-Public Sub ExportModuleOrClass(sName As String)
+Public Function ExportlModulesAndClasses() As Boolean    'Optional bAskToSave As Boolean = True) As Boolean
+' this routine will export classes and vba modules
     Dim component As VBComponent
-    Set component = Mod_ThisProject.VBComponents(sName)
+    Dim N As Long
+    Dim Saved As Boolean
+    Dim mType As Long
+
+    Dim c As New Collection
+    Dim msg As String
+
+    'First check if there are any code modules that have not been saved
+    For Each component In theProject.VBComponents
+        mType = moduleType(component.Name)
+        If mType = acStandardModule Or mType = acClassModule Then
+            Saved = component.Saved
+            If Saved = False Then
+                c.Add component.Name
+                msg = msg & IIf(msg & "" > "", vbCrLf, vbNullString) & component.Name
+            End If
+        End If
+    Next
+    If c.Count > 0 Then
+        msg = IIf(c.Count > 1, "There are ", "There is ") & c.Count & " unsaved modules/classes:" & vb2CrLf & msg _
+              & vb2CrLf & "Do you want to save them now?"
+        If MsgBox(msg, vbYesNo Or vbQuestion) = vbNo Then
+            FlashMessage "Export cancelled"
+            ExportlModulesAndClasses = False
+            Exit Function
+        End If
+        ' save the modules
+        For N = 1 To c.Count
+            Debug.Print c(N)
+            DoCmd.Save acModule, c(N)
+        Next N
+    End If
+    ' Now we can export
+    For Each component In theProject.VBComponents
+        mType = moduleType(component.Name)
+        If mType = acStandardModule Or mType = acClassModule Then
+            ExportModuleOrClass component.Name
+        End If
+    Next
+    ExportlModulesAndClasses = True
+    Debug.Print "done"
+End Function
+
+Public Sub ExportModuleOrClass(sName As String)
+'TODO check the savedstate to see if we need to export at all
+    Dim component As VBComponent
+    Set component = theProject.VBComponents(sName)
     If component.Type = vbext_ct_ClassModule Or component.Type = vbext_ct_StdModule Then
         Dim Saved As Boolean
-         Saved = moduleSaveState(sName)
+        Saved = isModuleSaved(sName)
         If Not Saved Then
-        
             ' code is modified. Save it now.
             DoCmd.Save acMacro, sName
         End If
-        component.Export GitFolder & component.Name & toFileExtension(component.Type)
-        gitSaveModuleState sName
+        ' TODO test this date export check
+        If dObjModified(acModule, sName) > gitExportDate(acModule, sName) Then
+            component.Export theGitFolder & component.Name & toFileExtension(component.Type)
+        End If
+        gitSaveObjectState acModule, sName
     End If
 End Sub
 
-' These gitSavexxxState routines log data about the objects which
-' will be used in a future addition to automate the selection of
-' the objects that are exported to text file. This will resudce the time
+' The getSaveObjectState routine logs data about the objects which
+' will be used in a future edition to automate the selection of
+' the objects that are exported to text files. This will reduce the time
 ' taken to output a project to the repository, ready to be commited.
 
-Private Sub gitSaveFormState(ByVal formName As String)
+'---------------------------------------------------------------------------------------
+' Procedure : getSaveObjectState
+' Author    : Lambert
+' Date      : 4/18/2019
+' Purpose   :
+'---------------------------------------------------------------------------------------
+'
+Private Sub gitSaveObjectState(ByVal oType As AcObjectType, ByVal oName As String)
+
     Dim db As DAO.Database
     Dim rs As DAO.Recordset
     Dim dLastModified As Date
     Dim IsSaved As Boolean
     Dim i As Long
-    Dim f As Form
 
-Set db = CurrentDb
+    On Error GoTo getSaveObjectState_Error
+    dLastModified = dObjModified(oType, oName)
+    Set db = CurrentDb
     Set rs = db.OpenRecordset(GIT_OBJECTS_TABLE, dbOpenDynaset)
     If Not IsDestroyed(rs) Then
-        Set Mod_ThisProject = Application.VBE.VBProjects(1)
-            dLastModified = formLastUpdated(formName)
-            IsSaved = True
-            With rs
-                .FindFirst "ObjectName=" & quote(formName) & " AND ObjectType=" & acForm
-                If .NoMatch Then
-                    .AddNew
-                Else
-                    .Edit
-                End If
-                'TODO only update fields that change
-                !ObjectName = formName
-                !LastUpdated = dLastModified
-                !ObjectType = acForm
+        Set theProject = Application.VBE.VBProjects(1)
+
+        With rs
+            .FindFirst "ObjectName=" & quote(oName) & " AND ObjectType=" & oType
+            If .NoMatch Then
+                .AddNew
+            Else
+                .Edit
+            End If
+            !ObjectName = oName
+            !LastUpdated = dLastModified
+            !ObjectType = oType
+            Select Case oType
+            Case acForm
                 !moduleType = acClassModule
-                !SavedState = IsSaved
-                'TODO, this should only be called in the export routine ExportAForm
-                !LastGitExport = Now()
-                .Update
-            End With
-
-            Debug.Print formName & " - Last Updated: " & dLastModified & " Is saved: " & IsSaved
+            Case acModule
+                !moduleType = moduleType(oName)
+                IsSaved = isModuleSaved(oName)
+            Case Else
+                !moduleType = Null
+            End Select
+            !SavedState = IsSaved
+            'TODO, this should only be called in the export routine ExportForm
+            !LastGitExport = Now()
+            .Update
+        End With
+        rs.Close
+        Set rs = Nothing
     Else
         Debug.Print "Failed to open the table " & GIT_OBJECTS_TABLE
     End If
-End Sub
-
-Private Sub gitSaveModuleState(ByVal ModuleName As String)
-    
-    Dim db As DAO.Database
-    Dim rs As DAO.Recordset
-    Dim dLastModified As Date
-    Dim IsSaved As Boolean
-    Dim i As Long
-
-    Set db = CurrentDb
-    Set rs = db.OpenRecordset(GIT_OBJECTS_TABLE, dbOpenDynaset)
+getSaveObjectState_Exit:
     If Not IsDestroyed(rs) Then
-        Set Mod_ThisProject = Application.VBE.VBProjects(1)
-            dLastModified = moduleLastUpdated(ModuleName)
-            IsSaved = moduleSaveState(ModuleName)
-            With rs
-                .FindFirst "ObjectName=" & quote(ModuleName) & " AND ObjectType=" & acModule
-                If .NoMatch Then
-                    .AddNew
-                Else
-                    .Edit
-                End If
-                !ObjectName = ModuleName
-                !LastUpdated = dLastModified
-                !ObjectType = acModule
-                !moduleType = moduleType(ModuleName)
-                !SavedState = IsSaved
-                !LastGitExport = Now()
-                .Update
-            End With
-
-            Debug.Print ModuleName & " - Last Updated: " & dLastModified & " Is saved: " & IsSaved
-    Else
-        Debug.Print "Failed to open the table " & GIT_OBJECTS_TABLE
+        rs.Close
+        Set rs = Nothing
     End If
+    On Error GoTo 0
+    Exit Sub
+
+getSaveObjectState_Error:
+    Dim err_other_info As Variant
+    Select Case Err.Number
+    Case 0    ' No Error
+        Resume getSaveObjectState_Exit    ' We should never get here
+    Case Else
+        #If Not DEBUGGING Then
+            logError Err.Number, Err.Description, "getSaveObjectState", "Class Module GIT_Rep_Tools", Erl, err_other_info
+            Resume getSaveObjectState_Exit
+        #Else
+            ' Next 3 lines only for debugging
+            MsgBox "Error " & Err.Number & " : " & Err.Description & " at line " & Erl, vbOKOnly, "getSaveObjectState"
+            Stop
+            Resume
+        #End If
+    End Select
 End Sub
 
-Private Sub gitSaveMacroState(ByVal MacroName As String)
-End Sub
 
-Private Sub gitSaveReportState(ByVal ReportName As String)
-End Sub
-
-Private Sub gitSaveQueryState(ByVal QueryName As String)
-End Sub
-
-Private Sub gitSaveTableState(ByVal TableName As String)
-End Sub
-
-Private Function moduleLastUpdated(sModuleName As String) As Date
-    moduleLastUpdated = CodeDb.Containers("Modules").Documents(sModuleName).LastUpdated
-End Function
-
-Private Function formLastUpdated(ByVal formName As String) As Date
-    Dim N As Long
-    Dim db As DAO.Database
-    Set db = CurrentDb
-
-    For N = 0 To db.Containers!Forms.Documents.Count - 1
-        If formName = db.Containers!Forms.Documents(N).Name Then
-            formLastUpdated db.Containers!Forms.Documents(N).LastUpdated
-            Exit Function
-        End If
-    Next N
-    Set db = Nothing
-End Function
-
-Private Function moduleSaveState(ModuleName As String) As Boolean
+Private Function isModuleSaved(ModuleName As String) As Boolean
     Dim IsSaved As Boolean
-    If Mod_ThisProject.VBComponents(ModuleName).Saved = False Then
-        moduleSaveState = False
+    If theProject.VBComponents(ModuleName).Saved = False Then
+        isModuleSaved = False
     Else
-        moduleSaveState = True
+        isModuleSaved = True
     End If
 End Function
 
@@ -292,6 +281,22 @@ Private Function moduleType(ByVal sName As String) As Long
     Set theProject = Nothing
 End Function
 
+Private Function toFileExtension(vbeComponentType As vbext_ComponentType) As String
+    Select Case vbeComponentType
+    Case vbext_ComponentType.vbext_ct_ClassModule
+        toFileExtension = ".cls"
+    Case vbext_ComponentType.vbext_ct_StdModule
+        toFileExtension = ".bas"
+    Case vbext_ComponentType.vbext_ct_MSForm
+        toFileExtension = ".frm"
+    Case vbext_ComponentType.vbext_ct_ActiveXDesigner
+    Case vbext_ComponentType.vbext_ct_Document
+    Case Else
+        toFileExtension = vbNullString
+    End Select
+
+End Function
+
 Private Function toObjType(ObjName As String) As AcObjectType
     If Left(ObjName, 5) = "Form_" Then
         If isDbObject(acForm, Mid(ObjName, 6)) Then
@@ -310,20 +315,115 @@ Private Function toObjType(ObjName As String) As AcObjectType
     End If
 End Function
 
+Private Function gitExportDate(nType As AcObjectType, sName As String) As Date
+Dim db As DAO.Database
+Dim rs As DAO.Recordset
+    Set db = CurrentDb
+    Set rs = db.OpenRecordset(GIT_OBJECTS_TABLE, dbOpenDynaset)
+    With rs
+        .FindFirst "ObjectType=" & nType & " and ObjectName='" & sName & "'"
+        If .NoMatch Then
+            gitExportDate = NULL_DATE
+        Else
+            gitExportDate = !LastGitExport
+        End If
+        .Close
+    End With
+    Set rs = Nothing
+    Set db = Nothing
+End Function
 
-Private Function toFileExtension(vbeComponentType As vbext_ComponentType) As String
-    Select Case vbeComponentType
-    Case vbext_ComponentType.vbext_ct_ClassModule
-        toFileExtension = ".cls"
-    Case vbext_ComponentType.vbext_ct_StdModule
-        toFileExtension = ".bas"
-    Case vbext_ComponentType.vbext_ct_MSForm
-        toFileExtension = ".frm"
-    Case vbext_ComponentType.vbext_ct_ActiveXDesigner
-    Case vbext_ComponentType.vbext_ct_Document
+'---------------------------------------------------------------------------------------
+' Procedure : dObjModified
+' Author    : Lambert
+' Date      : 4/16/2019
+' Purpose   : Returns the last modified date of the specified object, or the date 1/1/1700 on error
+' Paramaters: nType - what kind of object, Form, Table etc.
+'           : sName - its name
+'---------------------------------------------------------------------------------------
+'
+Private Function dObjModified(nType As AcObjectType, sName As String) As Date
+    Dim dbs As Object
+    Dim obj As AccessObject
+    On Error GoTo dObjModified_Error
+    Set dbs = CurrentProject
+    Select Case nType
+        '# FORM
+    Case acForm
+        dObjModified = dbs.AllForms(sName).DateModified
+        '# MODULE
+    Case acModule
+        For Each obj In dbs.AllModules
+            If obj.Name = sName Then
+                dObjModified = obj.DateModified
+            End If
+        Next obj
+        '# QUERY
+    Case acQuery
+        dObjModified = CurrentDb.QueryDefs(sName).LastUpdated
+        '# REPORT
+    Case acReport
+        dObjModified = dbs.AllReports(sName).DateModified
+        '# MACOR
+    Case acMacro
+        dObjModified = dbs.AllMacros(sName).DateModified
+        '# TABLE
+    Case acTable
+        dObjModified = CurrentDb.TableDefs(sName).LastUpdated
     Case Else
-        toFileExtension = vbNullString
+        DoEvents
     End Select
+dObjModified_Exit:
+    Set dbs = Nothing
+    Set obj = Nothing
+    On Error GoTo 0
+    Exit Function
 
+dObjModified_Error:
+    Dim msg As String
+    Dim t As String
+    Dim err_other_info As Variant
+    Select Case Err.Number
+    Case 0    ' No Error
+        Resume dObjModified_Exit    ' We should never get here
+    Case 2467    ' The expression you entered refers to an object that is closed or doesn't exist.
+        msg = "No such | named '" & sName & "'"
+        Select Case nType
+        Case acForm
+            t = "form"
+            '# MODULE
+        Case acModule
+            t = "module"
+            '# QUERY
+        Case acQuery
+            t = "query"
+            '# REPORT
+        Case acReport
+            t = "report"
+            '# MACOR
+        Case acMacro
+            t = "macro"
+            '# TABLE
+        Case acTable
+            t = "table"
+        Case Else
+        End Select
+        msg = Replace(msg, "|", t)
+        mbox msg, vbOKOnly
+        dObjModified = NULL_DATE
+        Resume dObjModified_Exit
+
+    Case Else
+        #If Not DEBUGGING Then
+            logError Err.Number, Err.Description, "dObjModified", "Module Git_tools_test_mod", Erl, err_other_info
+            dObjModified = NULL_DATE
+            Resume dObjModified_Exit
+        #Else
+            ' Next 3 lines only for debugging
+            MsgBox "Error " & Err.Number & " : " & Err.Description & " at line " & Erl, vbOKOnly, "dObjModified"
+            Stop
+            Resume
+        #End If
+    End Select
 End Function
 
